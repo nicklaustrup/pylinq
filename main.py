@@ -7,6 +7,7 @@ from networking.p2p_connection import P2PConnection
 import utils.config as config
 import utils.error_handler as error_handler
 
+
 class LiveStreamingApp:
     """
     Main application class for managing the media and networking layers.

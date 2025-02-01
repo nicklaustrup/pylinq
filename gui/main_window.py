@@ -14,7 +14,11 @@ class MainWindow:
     Handles user interactions and delegates media and networking logic.
     """
 
-    def __init__(self, root, start_stream_callback, stop_stream_callback, get_local_frame_callback):
+    def __init__(self, 
+                 root, 
+                 start_stream_callback, 
+                 stop_stream_callback, 
+                 get_local_frame_callback):
         """
         Initializes the GUI.
 
