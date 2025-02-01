@@ -1,10 +1,12 @@
 import asyncio
-from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate
+from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCConfiguration, RTCIceServer
 from aiortc.contrib.signaling import TcpSocketSignaling
 
 from networking.data_transmitter import DataTransmitter
 import utils.config as config
 import utils.error_handler as error_handler
+import json
+import websockets
 
 
 class P2PConnection:
@@ -14,8 +16,14 @@ class P2PConnection:
     """
     def __init__(self, signaling_host=config.SIGNALING_SERVER_HOST, signaling_port=config.SIGNALING_SERVER_PORT,
                  local_video=None, local_audio=None):
-        self.pc = RTCPeerConnection()
-        self.signaling = TcpSocketSignaling(signaling_host, signaling_port)
+        self.signaling_host = signaling_host
+        self.signaling_port = signaling_port
+        ice_servers = [
+            RTCIceServer(urls="stun:stun.l.google.com:19302"),  # Use a public STUN server
+        ]
+        config = RTCConfiguration(iceServers=ice_servers)
+        self.pc = RTCPeerConnection(configuration=config)
+        self.signaling = TcpSocketSignaling(self.signaling_host, self.signaling_port)
         self.transmitter = DataTransmitter(self.pc, local_video_track=local_video, local_audio_track=local_audio)
         self.signal_stop = False
 
@@ -24,66 +32,65 @@ class P2PConnection:
         Sets up the connection and starts signaling.
         """
         error_handler.log_info("Starting peer-to-peer connection...")
-        try:
-            if is_initiator:
-                await self._create_offer()
-            else:
-                await self._handle_offer()
+
+        async with websockets.connect(f"ws://{self.signaling_host}:{self.signaling_port}") as websocket:
+            @self.pc.on("icecandidate")
+            async def on_icecandidate(candidate):
+                if candidate:
+                    await websocket.send(json.dumps({
+                        "candidate": candidate.candidate,
+                        "sdpMid": candidate.sdpMid,
+                        "sdpMLineIndex": candidate.sdpMLineIndex
+                    }))
+
+            @self.pc.on("connectionstatechange")
+            def on_connectionstatechange():
+                if self.pc.connectionState == 'connected':
+                    error_handler.log_info(f"Connection established: Senders: {self.pc.getSenders()}, Receivers: {self.pc.getReceivers()}")
 
             # Start media transmission
             await self.transmitter.send_streams()
             await self.transmitter.receive_streams()
+            
+            if is_initiator:
+                await self._create_offer(websocket)
+            else:
+                await self._handle_offer(websocket)
 
-            # @self.pc.on("icecandidate")
-            # async def on_icecandidate(candidate):
-            #     await self.signaling.send(candidate)
-
-            @self.pc.on("connectionstatechange")
-            def broadcast_connection():
-                if self.pc.connectionState == 'connected':
-                    error_handler.log_info(f"Connection established == Sender: {self.pc.getSenders()} "
-                                           f"Receiver: {self.pc.getReceivers()}")
-                    # return self.pc
-        except Exception as e:
-            error_handler.handle_exception(e, context="P2PConnection.setup_connection")
-
-    async def _create_offer(self):
+    async def _create_offer(self, websocket):
         error_handler.log_info("Creating and sending SDP offer...")
         try:
-            offer = await self.pc.createOffer()
-            await self.pc.setLocalDescription(offer)
-            await self.signaling.send(offer)
-
-            # Handle incoming ICE candidates and answers
-            self.signal_stop = True
-            await self._handle_signaling()
+            await self.pc.setLocalDescription(await self.pc.createOffer())
+            await websocket.send(json.dumps({
+                "sdp": self.pc.localDescription.sdp,
+                "type": self.pc.localDescription.type
+            }))
         except Exception as e:
             error_handler.handle_exception(e, context="P2PConnection._create_offer")
 
-    async def _handle_offer(self):
+    async def _handle_offer(self, websocket):
         error_handler.log_info("Waiting for SDP offer...")
         try:
-            offer = await self.signaling.receive()
-            await self.pc.setRemoteDescription(offer)
-
-            error_handler.log_info("Sending SDP answer...")
-            answer = await self.pc.createAnswer()
-            await self.pc.setLocalDescription(answer)
-            await self.signaling.send(answer)
-
-            # Handle incoming ICE candidates
-            self.signal_stop = True
-            await self._handle_signaling()
+            async for message in websocket:
+                data = json.loads(message)
+                if "sdp" in data:
+                    desc = RTCSessionDescription(sdp=data["sdp"], type=data["type"])
+                    await self.pc.setRemoteDescription(desc)
+                    if desc.type == "offer":
+                        await self.pc.setLocalDescription(await self.pc.createAnswer())
+                        await websocket.send(json.dumps({
+                            "sdp": self.pc.localDescription.sdp,
+                            "type": self.pc.localDescription.type
+                        }))
+                elif "candidate" in data:
+                    candidate = RTCIceCandidate(
+                        sdpMid=data["sdpMid"],
+                        sdpMLineIndex=data["sdpMLineIndex"],
+                        candidate=data["candidate"]
+                    )
+                    await self.pc.addIceCandidate(candidate)
         except Exception as e:
             error_handler.handle_exception(e, context="P2PConnection._handle_offer")
-
-    async def _handle_signaling(self):
-        while self.signal_stop:
-            obj = await self.signaling.receive()
-            if isinstance(obj, RTCSessionDescription):
-                await self.pc.setRemoteDescription(obj)
-            elif isinstance(obj, RTCIceCandidate):
-                await self.pc.addIceCandidate(obj)
 
     def stop(self):
         """

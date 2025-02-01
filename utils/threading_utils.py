@@ -63,8 +63,9 @@ def stop_thread(thread):
 
     :param thread: The thread to stop.
     """
-    if thread.is_alive():
-        thread.join()
+    if thread is not None:
+        if thread.is_alive():
+            thread.join()
 
 
 def run_safely(target, *args):

@@ -14,10 +14,10 @@ class MainWindow:
     Handles user interactions and delegates media and networking logic.
     """
 
-    def __init__(self, 
-                 root, 
-                 start_stream_callback, 
-                 stop_stream_callback, 
+    def __init__(self,
+                 root,
+                 start_stream_callback,
+                 stop_stream_callback,
                  get_local_frame_callback):
         """
         Initializes the GUI.
@@ -56,7 +56,7 @@ class MainWindow:
 
         # connect_button = ttk.Button(connection_frame, text="Connect", command=self._on_connect)
         # connect_button.grid(row=0, column=2, padx=5)
-        #
+        
         # disconnect_button = ttk.Button(connection_frame, text="Disconnect", command=self._on_disconnect)
         # disconnect_button.grid(row=0, column=3, padx=5)
 

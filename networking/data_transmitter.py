@@ -2,6 +2,7 @@ import asyncio
 from aiortc import MediaStreamTrack
 from av import AudioFrame, VideoFrame
 import time
+import pyaudio
 
 import utils.threading_utils as thread_utils
 import utils.config as config
@@ -73,15 +74,22 @@ class DataTransmitter:
         Processes incoming audio track frames and outputs them.
         """
         error_handler.log_info("Processing audio frames from remote peer")
+        p = pyaudio.PyAudio()
+        stream = p.open(format=pyaudio.paInt16,
+                        channels=1,
+                        rate=48000,
+                        output=True)
+
         while self.running:
             try:
                 frame = await track.recv()
                 if isinstance(frame, AudioFrame):
-                    # Here we would play the audio using PyAudio or a similar library
-                    error_handler.log_info(f"Received audio frame at {time.time()}")
+                    # Convert the audio frame to raw audio data
+                    audio_data = frame.to_ndarray().tobytes()
+                    # Play the audio data
+                    stream.write(audio_data)
             except Exception as e:
                 error_handler.handle_exception(e, context="data_transmitter._process_audio_track")
-                break
 
     def stop(self):
         """
@@ -90,8 +98,15 @@ class DataTransmitter:
         try:
             error_handler.log_info("Stopping data transmission")
             self.running = False
-            thread_utils.stop_thread(self.video_thread)
-            thread_utils.stop_thread(self.audio_thread)
+            # Check if video_thread is not None before stopping it
+            if self.video_thread is not None:
+                thread_utils.stop_thread(self.video_thread)
+                self.video_thread = None
+
+            # Check if audio_thread is not None before stopping it
+            if self.audio_thread is not None:
+                thread_utils.stop_thread(self.audio_thread)
+                self.audio_thread = None
 
             if self.local_video_track:
                 self.local_video_track.stop()

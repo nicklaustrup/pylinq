@@ -38,7 +38,7 @@ class LiveStreamingApp:
                 local_video=self.media_streamer.get_video_track(),
                 local_audio=self.media_streamer.get_audio_track(),
             )
-            asyncio.ensure_future(self.p2p_connection.start_connection(is_initiator=True))
+            asyncio.run(self.p2p_connection.start_connection(is_initiator=True))
         except Exception as e:
             error_handler.handle_exception(e, context="start_stream")
             raise
